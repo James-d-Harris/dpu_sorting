@@ -301,6 +301,11 @@ int main(int argc, char **argv) {
     int ok_q = (memcmp(cpu_arr, q_sorted, sizeof(uint32_t) * N) == 0);
     printf("Validation (CPU quicksort vs DPU quicksort+merge): %s\n", ok_q ? "PASS" : "FAIL");
 
+    free(q_sorted); free(q_heap);
+    for (uint32_t i = 0; i < NB_DPUS; i++) free(q_shards[i]);
+    free(q_shards); free(q_stats);
+    DPU_ASSERT(dpu_free(q_set));
+
     // ===== DPU MERGESORT PASS =====
     struct dpu_set_t m_set, m_dpu;
     DPU_ASSERT(dpu_alloc(NB_DPUS, "backend=simulator", &m_set));
@@ -427,11 +432,6 @@ int main(int argc, char **argv) {
     }
 
     // ----- Cleanup -----
-    free(q_sorted); free(q_heap);
-    for (uint32_t i = 0; i < NB_DPUS; i++) free(q_shards[i]);
-    free(q_shards); free(q_stats);
-    DPU_ASSERT(dpu_free(q_set));
-
     free(m_sorted); free(m_heap);
     for (uint32_t i = 0; i < NB_DPUS; i++) free(m_shards[i]);
     free(m_shards); free(m_stats);
