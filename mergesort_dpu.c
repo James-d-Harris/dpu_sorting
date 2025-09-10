@@ -43,19 +43,19 @@ struct dpu_args { uint32_t n_elems; };
 __host struct dpu_args ARGS;
 
 // ---------- MRAM helpers ----------
-static inline void mram_read_elem_src(const elem_t *base, uint32_t idx, elem_t *dst) {
-    mram_read((void *)&base[idx], dst, sizeof(elem_t));
+static inline void mram_read_elem_src(const __mram_ptr elem_t *base, uint32_t idx, elem_t *dst) {
+    mram_read(&base[idx], dst, sizeof(elem_t));
 }
-static inline void mram_write_elem_dst(elem_t *base, uint32_t idx, const elem_t *src) {
-    mram_write((void *)src, (void *)&base[idx], sizeof(elem_t));
+static inline void mram_write_elem_dst(__mram_ptr elem_t *base, uint32_t idx, const elem_t *src) {
+    mram_write(src, &base[idx], sizeof(elem_t));
 }
 
 // Merge [lo, mid) and [mid, hi) from SRC -> DST (all indices 0-based)
-static void merge_run(const elem_t *SRC, elem_t *DST, uint32_t lo, uint32_t mid, uint32_t hi) {
+static void merge_run(const __mram_ptr elem_t *SRC, __mram_ptr elem_t *DST,
+                      uint32_t lo, uint32_t mid, uint32_t hi) {
     uint32_t i = lo, j = mid, k = lo;
     elem_t a, b;
 
-    // pre-read the first elements (guard for empty runs)
     bool has_a = (i < mid);
     bool has_b = (j < hi);
     if (has_a) mram_read_elem_src(SRC, i, &a);
@@ -93,13 +93,11 @@ static void merge_run(const elem_t *SRC, elem_t *DST, uint32_t lo, uint32_t mid,
 static void mergesort_mram(uint32_t n) {
     if (n <= 1) return;
 
-    const elem_t *src = MRAM_ARR;   // start reading from ARR
-    elem_t *dst = MRAM_TMP;         // writing to TMP
+    const __mram_ptr elem_t *src = MRAM_ARR;   // start reading from ARR
+    __mram_ptr elem_t *dst = MRAM_TMP;         // writing to TMP
 
-    // width = size of each sorted run in the current pass
     for (uint32_t width = 1; width < n; width <<= 1) {
-        uint32_t lo = 0;
-        while (lo < n) {
+        for (uint32_t lo = 0; lo < n; lo += (width << 1)) {
             uint32_t mid = lo + width;
             uint32_t hi  = lo + (width << 1);
             if (mid > n) mid = n;
@@ -107,7 +105,6 @@ static void mergesort_mram(uint32_t n) {
 
             // If the right run is empty, just copy the left run
             if (mid >= hi) {
-                // linear copy lo..mid-1 from src to dst
                 for (uint32_t t = lo; t < mid; t++) {
                     elem_t tmp;
                     mram_read_elem_src(src, t, &tmp);
@@ -116,16 +113,15 @@ static void mergesort_mram(uint32_t n) {
             } else {
                 merge_run(src, dst, lo, mid, hi);
             }
-            lo += (width << 1);
         }
         // swap roles
-        const elem_t *old_src = src;
-        src = (const elem_t *)dst;
-        dst = (elem_t *)old_src;
+        const __mram_ptr elem_t *old_src = src;
+        src = (const __mram_ptr elem_t *)dst;
+        dst = (__mram_ptr elem_t *)old_src;
     }
 
     // If final data landed in MRAM_TMP, copy back to MRAM_ARR
-    if (src == (const elem_t *)MRAM_TMP) {
+    if (src == (const __mram_ptr elem_t *)MRAM_TMP) {
         for (uint32_t t = 0; t < n; t++) {
             elem_t tmp;
             mram_read_elem_src(MRAM_TMP, t, &tmp);
@@ -152,10 +148,8 @@ int main() {
     if (me() == 0) start_c = perfcounter_get();
     barrier_wait(&sync_barrier);
 
-    if (me() == 0 && n > 1) {
-        // tasklet 0 mergesorts the whole shard
-        mergesort_mram(n);
-    }
+    if (me() == 0 && n > 1) mergesort_mram(n);
+
     barrier_wait(&sync_barrier);
 
     if (me() == 0) {
