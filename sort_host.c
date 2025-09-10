@@ -220,7 +220,6 @@ int main(int argc, char **argv) {
         base += cnt;
         if (cnt > MAX_ELEMS_PER_DPU) {
             fprintf(stderr, "Shard %u too large for MRAM (%u > %u)\n", i, cnt, MAX_ELEMS_PER_DPU);
-            DPU_ASSERT(dpu_free(dpu_set));
             return 1;
         }
     }
