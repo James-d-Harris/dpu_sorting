@@ -7,13 +7,27 @@ tasklets = 16
 dpus = 64
 stack_size = 256
 
-all: main dpucode
+all: main quicksort_dpu mergesort_dpu
 
-dpucode: quicksort_dpu.c
-	dpu-upmem-dpurte-clang -O2 -DNR_TASKLETS=$(tasklets) -DNR_DPUS=${dpus} -DSTACK_SIZE_DEFAULT=$(stack_size) quicksort_dpu.c -o quicksort_dpu
+quicksort_dpu: quicksort_dpu.c
+	dpu-upmem-dpurte-clang -O2 \
+		-DNR_TASKLETS=$(tasklets) \
+		-DNR_DPUS=$(dpus) \
+		-DSTACK_SIZE_DEFAULT=$(stack_size) \
+		quicksort_dpu.c -o quicksort_dpu
 
-main: quicksort_host.c dpucode
-	$(cc) quicksort_host.c $(flags) $(dpuflags) -o main
+mergesort_dpu: mergesort_dpu.c
+	dpu-upmem-dpurte-clang -O2 \
+		-DNR_TASKLETS=$(tasklets) \
+		-DNR_DPUS=$(dpus) \
+		-DSTACK_SIZE_DEFAULT=$(stack_size) \
+		mergesort_dpu.c -o mergesort_dpu
+
+main: sort_host.c
+	$(cc) sort_host.c $(flags) $(dpuflags) \
+		-DDPU_QUICK_BINARY="\"./quicksort_dpu\"" \
+		-DDPU_MERGE_BINARY="\"./mergesort_dpu\"" \
+		-o main
 
 clean:
-	rm -rf main quicksort_dpu *.o *.out
+	rm -rf main quicksort_dpu mergesort_dpu *.o *.out
