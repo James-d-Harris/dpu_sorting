@@ -130,6 +130,66 @@ static void mergesort_mram(uint32_t n) {
     }
 }
 
+static void mergesort_mram_parallel(uint32_t n) {
+    if (n <= 1) return;
+
+    uint32_t t = (uint32_t)me();
+    uint32_t T = NR_TASKLETS;
+
+    uint32_t start_c = 0;
+    if (t == 0) {
+        STATS.n_elems = n;
+        STATS.nr_tasklets = NR_TASKLETS;
+        start_c = perfcounter_get();
+    }
+    barrier_wait(&sync_barrier);
+
+
+
+    for (uint32_t pass = 0, width = 1; width < n; pass++, width <<= 1) {
+        const __mram_ptr elem_t *src = (pass & 1) ? MRAM_TMP : MRAM_ARR;   // start reading from ARR
+        __mram_ptr elem_t *dst = (pass & 1) ? MRAM_ARR : MRAM_TMP;         // writing to TMP
+        uint32_t step = T * (width << 1);
+        uint32_t lo = t * (width << 1);
+        while (lo < n) {
+            uint32_t mid = lo + width;
+            uint32_t hi  = lo + (width << 1);
+            if (mid > n) mid = n;
+            if (hi  > n) hi  = n;
+
+            // If the right run is empty, just copy the left run
+            if (mid >= hi) {
+                for (uint32_t x = lo; x < mid; x++) {
+                    elem_t tmp;
+                    mram_read_elem_src(src, x, &tmp);
+                    mram_write_elem_dst(dst, x, &tmp);
+                }
+            } else {
+                merge_run(src, dst, lo, mid, hi);
+            }
+            lo += step;
+        }
+        barrier_wait(&sync_barrier);
+    }
+
+    // If final data landed in MRAM_TMP, copy back to MRAM_ARR
+    if (passes & 1) {
+        for (uint32_t i = t; i < n; i += T) {
+            elem_t tmp;
+            mram_read_elem_src(MRAM_TMP, i, &tmp);
+            mram_write_elem_dst(MRAM_ARR, i, &tmp);
+        }
+        barrier_wait(&sync_barrier);
+    }
+
+    if (t == 0 ) {
+        uint32_t end_c = perfcounter_get();
+        STATS.cycles_sort = end_c - start_c;
+        STATS.cycles_total = perfcounter_get();;
+    }
+    barrier_wait(&sync_barrier);
+}
+
 // ---------- Tasklet entry ----------
 int main() {
     if (me() == 0) {
@@ -144,19 +204,22 @@ int main() {
 
     uint32_t n = ARGS.n_elems;
 
-    uint32_t start_c = 0, end_c = 0;
-    if (me() == 0) start_c = perfcounter_get();
-    barrier_wait(&sync_barrier);
+    // // One tasklet implementation
+    // uint32_t start_c = 0, end_c = 0;
+    // if (me() == 0) start_c = perfcounter_get();
+    // barrier_wait(&sync_barrier);
 
-    if (me() == 0 && n > 1) mergesort_mram(n);
+    // if (me() == 0 && n > 1) mergesort_mram(n);
 
-    barrier_wait(&sync_barrier);
+    // barrier_wait(&sync_barrier);
 
-    if (me() == 0) {
-        end_c = perfcounter_get();
-        STATS.cycles_sort  = end_c - start_c;
-        STATS.cycles_total = perfcounter_get();
-    }
+    // if (me() == 0) {
+    //     end_c = perfcounter_get();
+    //     STATS.cycles_sort  = end_c - start_c;
+    //     STATS.cycles_total = perfcounter_get();
+    // }
+
+    mergesort_mram_parallel(n);
     barrier_wait(&sync_barrier);
     return 0;
 }
