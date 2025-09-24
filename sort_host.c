@@ -13,7 +13,7 @@
 
 // ---------- Build-time knobs (override in Makefile) ----------
 #ifndef NR_DPUS
-#define NR_DPUS 64
+#define NR_DPUS 2546
 #endif
 #ifndef NR_TASKLETS
 #define NR_TASKLETS 16
@@ -175,7 +175,7 @@ static inline void heap_down(heap_node_t *h, uint32_t n, uint32_t i) {
 int main(int argc, char **argv) {
     // ----- Parameters -----
     uint32_t N = (argc >= 2) ? (uint32_t)strtoul(argv[1], NULL, 10) : (1u << 20);
-    const uint32_t NB_DPUS = NR_DPUS;
+    uint32_t NB_DPUS = NR_DPUS;
     printf("Sorting N=%u across %u DPUs (NR_TASKLETS=%u)\n", N, NB_DPUS, (unsigned)NR_TASKLETS);
 
     // ----- Prepare host data -----
@@ -226,12 +226,28 @@ int main(int argc, char **argv) {
 
     // ===== DPU QUICKSORT PASS =====
     struct dpu_set_t q_set, q_dpu;
-    DPU_ASSERT(dpu_alloc(NB_DPUS, "backend=simulator", &q_set));
+    dpu_error_t err = dpu_alloc_ranks(DPU_ALLOCATE_ALL, NULL, &q_set);
+    if (err != DPU_OK) {
+        fprintf(stderr, "alloc_ranks failed: %s\n", dpu_error_to_string(err));
+        return 1;
+    }
+    uint32_t avail_q = 0;
+    DPU_ASSERT(dpu_get_nr_dpus(q_set, &avail_q));
+    if (avail_q == 0) {
+        fprintf(stderr, "No DPUs available.\n");
+        return 1;
+    }
+    if (avail_q < NB_DPUS) {
+        fprintf(stderr, "Only %u DPUs available. Capping from requested %u.\n", avail_q, NB_DPUS);
+        NB_DPUS = avail_q;
+    }
     DPU_ASSERT(dpu_load(q_set, DPU_QUICK_BINARY, NULL));
 
     clock_gettime(CLOCK_MONOTONIC, &t_q_h2d_s);
     uint32_t idx = 0;
     DPU_FOREACH(q_set, q_dpu) {
+        if (idx >= NB_DPUS) break;
+
         const uint32_t start = shard_starts[idx];
         const uint32_t count = shard_counts[idx];
 
@@ -261,6 +277,8 @@ int main(int argc, char **argv) {
 
     idx = 0;
     DPU_FOREACH(q_set, q_dpu) {
+        if (idx >= NB_DPUS) break;
+
         const uint32_t count = shard_counts[idx];
         elem_t *packed = (elem_t *)aligned_alloc(8, sizeof(elem_t) * count);
         if (!packed) { fprintf(stderr, "OOM\n"); return 1; }
@@ -308,12 +326,29 @@ int main(int argc, char **argv) {
 
     // ===== DPU MERGESORT PASS =====
     struct dpu_set_t m_set, m_dpu;
-    DPU_ASSERT(dpu_alloc(NB_DPUS, "backend=simulator", &m_set));
+    // DPU_ASSERT(dpu_alloc(NB_DPUS, NULL, &m_set));
+    DPU_ASSERT(dpu_alloc_ranks(DPU_ALLOCATE_ALL, NULL, &m_set));
+    if (err != DPU_OK) {
+        fprintf(stderr, "alloc_ranks failed: %s\n", dpu_error_to_string(err));
+        return 1;
+    }
+    uint32_t avail_m = 0;
+    DPU_ASSERT(dpu_get_nr_dpus(m_set, &avail_m));
+    if (avail_m == 0) {
+        fprintf(stderr, "No DPUs available.\n");
+        return 1;
+    }
+    if (avail_m < NB_DPUS) {
+        fprintf(stderr, "Only %u DPUs available. Capping from requested %u.\n", avail_m, NB_DPUS);
+        NB_DPUS = avail_m;
+    }
     DPU_ASSERT(dpu_load(m_set, DPU_MERGE_BINARY, NULL));
 
     clock_gettime(CLOCK_MONOTONIC, &t_m_h2d_s);
     idx = 0;
     DPU_FOREACH(m_set, m_dpu) {
+        if (idx >= NB_DPUS) break;
+        
         const uint32_t start = shard_starts[idx];
         const uint32_t count = shard_counts[idx];
 
@@ -343,6 +378,8 @@ int main(int argc, char **argv) {
 
     idx = 0;
     DPU_FOREACH(m_set, m_dpu) {
+        if (idx >= NB_DPUS) break;
+
         const uint32_t count = shard_counts[idx];
         elem_t *packed = (elem_t *)aligned_alloc(8, sizeof(elem_t) * count);
         if (!packed) { fprintf(stderr, "OOM\n"); return 1; }

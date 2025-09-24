@@ -3,8 +3,7 @@ cc=gcc
 flags= -O3 -Wall
 dpuflags= `dpu-pkg-config --cflags --libs dpu`
 tasklets = 16
-# dpus = 2546
-dpus = 64
+dpus = 2546
 stack_size = 256
 
 all: main quicksort_dpu mergesort_dpu
